@@ -8,7 +8,15 @@ You'll need to install [libmaxminddb](https://github.com/maxmind/libmaxminddb) f
 Hive::GeoIP2.lookup('88.174.0.1', 'GeoLite2-City.mmdb')
 ```
 
-Returns:
+or
+
+```ruby
+mmdb = Hive::GeoIP2.new('GeoLite2-City.mmdb')
+mmdb.lookup('88.174.0.1')
+mmdb.close
+```
+
+The result is returned as a `Hash`:
 
 ```ruby
 {
