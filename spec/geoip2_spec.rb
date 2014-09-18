@@ -81,6 +81,38 @@ class GeoIP2Spec < MiniTest::Spec
     it 'returns nil if the IP was not found' do
       GeoIP2.lookup('127.0.0.1', "#{ROOT}/database.mmdb").must_be_nil
     end
+    
+    it 'can be instantiated' do
+      geo = GeoIP2.new("#{ROOT}/database.mmdb")
+      geo.lookup('88.174.0.0').must_be_instance_of(Hash)
+      geo.close
+    end
+    
+    it 'raises IOError when calling #lookup on a closed database' do
+      -> {
+        geo = GeoIP2.new("#{ROOT}/database.mmdb")
+        geo.close
+        geo.lookup('88.174.0.0')
+      }.must_raise(IOError)
+    end
+    
+    it 'raises IOError if the database cannot be opened' do
+      -> {
+        GeoIP2.new("#{ROOT}/nope.mmdb")
+      }.must_raise(IOError)
+    end
+    
+    describe '#closed?' do
+      it 'returns false if the database is open' do
+        assert GeoIP2.new("#{ROOT}/database.mmdb").closed? == false
+      end
+      
+      it 'returns true if the database is closed' do
+        geo = GeoIP2.new("#{ROOT}/database.mmdb")
+        geo.close
+        assert geo.closed? == true
+      end
+    end
  end
   
 end

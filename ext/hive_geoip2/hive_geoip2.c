@@ -11,20 +11,36 @@
 VALUE rb_mHive;
 VALUE rb_cGeoIP2;
 
-static VALUE parse_data_list(MMDB_entry_data_list_s *data_list, VALUE *ret_obj);
+static void guard_parse_data_list(VALUE arg);
+static MMDB_entry_data_list_s * parse_data_list(
+  MMDB_entry_data_list_s *data_list, VALUE *ret_obj
+);
+static void mmdb_try_open(char *db_path, MMDB_s *mmdb);
+static inline bool mmdb_is_closed(MMDB_s *mmdb);
+static inline void mmdb_close(MMDB_s *mmdb);
+static VALUE mmdb_lookup(MMDB_s *mmdb, char *ip_addr, bool cleanup);
+
+static VALUE rb_hive_geo_lookup(VALUE self, VALUE ip_arg);
+static VALUE rb_hive_geo_lookup2(VALUE self, VALUE ip_arg, VALUE db_arg);
+static VALUE rb_hive_geo_is_closed(VALUE self);
+static VALUE rb_hive_geo_close(VALUE self);
+static void rb_hive_geo_free(MMDB_s *mmdb);
+static VALUE rb_hive_geo_alloc(VALUE self);
+static VALUE rb_hive_geo_init(VALUE self, VALUE db_arg);
 
 struct args_parse_data_list {
   MMDB_entry_data_list_s *data_list;
   VALUE *ret_obj;
 };
 
-static VALUE guard_parse_data_list(VALUE arg) {
+static void guard_parse_data_list(VALUE arg) {
   struct args_parse_data_list *args = (struct args_parse_data_list *)arg;
   
   parse_data_list(args->data_list, args->ret_obj);
 }
 
-static VALUE parse_data_list(MMDB_entry_data_list_s *data_list, VALUE *ret_obj) {
+static MMDB_entry_data_list_s *
+parse_data_list(MMDB_entry_data_list_s *data_list, VALUE *ret_obj) {
   switch (data_list->entry_data.type) {
     case MMDB_DATA_TYPE_MAP:
     {
@@ -192,37 +208,46 @@ static VALUE parse_data_list(MMDB_entry_data_list_s *data_list, VALUE *ret_obj) 
   return data_list;
 }
 
-static VALUE rb_hive_geo_lookup(VALUE self, VALUE ip_arg, VALUE db_arg) {
-  Check_Type(ip_arg, T_STRING);
-  Check_Type(db_arg, T_STRING);
-  
-  char *ip_addr = StringValuePtr(ip_arg);
-  char *db_path = StringValuePtr(db_arg);
-  
-  MMDB_s mmdb;
-  
-  int status = MMDB_open(db_path, MMDB_MODE_MMAP, &mmdb);
+static void mmdb_try_open(char *db_path, MMDB_s *mmdb) {
+  int status = MMDB_open(db_path, MMDB_MODE_MMAP, mmdb);
   
   if (status != MMDB_SUCCESS) {
     rb_raise(rb_eIOError, "GeoIP2 - %s: %s",
       MMDB_strerror(status), db_path
     );
   }
-  
-  int gai_error, mmdb_error;
+}
+
+static inline bool mmdb_is_closed(MMDB_s *mmdb) {
+  return mmdb->file_content == NULL;
+}
+
+static inline void mmdb_close(MMDB_s *mmdb) {
+  MMDB_close(mmdb);
+  mmdb->file_content = NULL;
+}
+
+static VALUE mmdb_lookup(MMDB_s *mmdb, char *ip_addr, bool cleanup) {
+  int status, gai_error, mmdb_error;
   
   MMDB_lookup_result_s result =
-    MMDB_lookup_string(&mmdb, ip_addr, &gai_error, &mmdb_error);
+    MMDB_lookup_string(mmdb, ip_addr, &gai_error, &mmdb_error);
   
   if (mmdb_error != MMDB_SUCCESS) {
-    MMDB_close(&mmdb);
+    if (cleanup) {
+      mmdb_close(mmdb);
+    }
+    
     rb_raise(rb_eRuntimeError,
       "GeoIP2 - lookup failed: %s", MMDB_strerror(mmdb_error)
     );
   }
   
   if (gai_error != 0) {
-    MMDB_close(&mmdb);
+    if (cleanup) {
+      mmdb_close(mmdb);
+    }
+    
     rb_raise(rb_eRuntimeError,
       "GeoIP2 - getaddrinfo failed: %s", gai_strerror(gai_error)
     );
@@ -235,7 +260,11 @@ static VALUE rb_hive_geo_lookup(VALUE self, VALUE ip_arg, VALUE db_arg) {
     
     if (status != MMDB_SUCCESS) {
       MMDB_free_entry_data_list(data_list);
-      MMDB_close(&mmdb);
+      
+      if (cleanup) {
+        mmdb_close(mmdb);
+      }
+      
       rb_raise(rb_eRuntimeError,
         "GeoIP2 - couldn\'t fetch results: %s", MMDB_strerror(status)
       );
@@ -255,7 +284,9 @@ static VALUE rb_hive_geo_lookup(VALUE self, VALUE ip_arg, VALUE db_arg) {
     
     MMDB_free_entry_data_list(first);
     
-    MMDB_close(&mmdb);
+    if (cleanup) {
+      mmdb_close(mmdb);
+    }
     
     if (exception) {
       rb_jump_tag(exception);
@@ -268,8 +299,94 @@ static VALUE rb_hive_geo_lookup(VALUE self, VALUE ip_arg, VALUE db_arg) {
   }
 }
 
+static VALUE rb_hive_geo_lookup(VALUE self, VALUE ip_arg) {
+  Check_Type(ip_arg, T_STRING);
+  
+  char *ip_addr = StringValuePtr(ip_arg);
+  
+  MMDB_s *mmdb;
+  
+  Data_Get_Struct(self, MMDB_s, mmdb);
+  
+  if (mmdb_is_closed(mmdb)) {
+    rb_raise(rb_eIOError, "GeoIP2 - closed database");
+  }
+  
+  return mmdb_lookup(mmdb, ip_addr, false);
+}
+
+static VALUE rb_hive_geo_lookup2(VALUE self, VALUE ip_arg, VALUE db_arg) {
+  Check_Type(ip_arg, T_STRING);
+  Check_Type(db_arg, T_STRING);
+  
+  char *ip_addr = StringValuePtr(ip_arg);
+  char *db_path = StringValuePtr(db_arg);
+  
+  MMDB_s mmdb;
+  
+  mmdb_try_open(db_path, &mmdb);
+  
+  return mmdb_lookup(&mmdb, ip_addr, true);
+}
+
+static VALUE rb_hive_geo_is_closed(VALUE self) {
+  MMDB_s *mmdb;
+  
+  Data_Get_Struct(self, MMDB_s, mmdb);
+  
+  return mmdb_is_closed(mmdb) ? Qtrue : Qfalse;
+}
+
+static VALUE rb_hive_geo_close(VALUE self) {
+  MMDB_s *mmdb;
+  
+  Data_Get_Struct(self, MMDB_s, mmdb);
+  
+  if (!mmdb_is_closed(mmdb)) {
+    mmdb_close(mmdb);
+  }
+  
+  return Qnil;
+}
+
+static void rb_hive_geo_free(MMDB_s *mmdb) {
+  if (!mmdb_is_closed(mmdb)) {
+    mmdb_close(mmdb);
+  }
+  
+  xfree(mmdb);
+}
+
+static VALUE rb_hive_geo_alloc(VALUE self) {
+  MMDB_s *mmdb = ALLOC(MMDB_s);
+  
+  return Data_Wrap_Struct(self, NULL, rb_hive_geo_free, mmdb);
+}
+
+static VALUE rb_hive_geo_init(VALUE self, VALUE db_arg) {
+  Check_Type(db_arg, T_STRING);
+  
+  char *db_path = StringValuePtr(db_arg);
+  
+  MMDB_s *mmdb;
+  
+  Data_Get_Struct(self, MMDB_s, mmdb);
+  
+  mmdb_try_open(db_path, mmdb);
+  
+  return Qnil;
+}
+
 void Init_hive_geoip2() {
   rb_mHive = rb_define_module("Hive");
   rb_cGeoIP2 = rb_define_class_under(rb_mHive, "GeoIP2", rb_cObject);
-  rb_define_singleton_method(rb_cGeoIP2, "lookup", rb_hive_geo_lookup, 2);
+  
+  rb_define_alloc_func(rb_cGeoIP2, rb_hive_geo_alloc);
+  
+  rb_define_singleton_method(rb_cGeoIP2, "lookup", rb_hive_geo_lookup2, 2);
+  
+  rb_define_method(rb_cGeoIP2, "initialize", rb_hive_geo_init, 1);
+  rb_define_method(rb_cGeoIP2, "close", rb_hive_geo_close, 0);
+  rb_define_method(rb_cGeoIP2, "closed?", rb_hive_geo_is_closed, 0);
+  rb_define_method(rb_cGeoIP2, "lookup", rb_hive_geo_lookup, 1);
 }
