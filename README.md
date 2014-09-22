@@ -1,6 +1,12 @@
 # libmaxminddb Ruby bindings
 
-You'll need to install [libmaxminddb](https://github.com/maxmind/libmaxminddb) first.
+### Installation
+
+Install [libmaxminddb](https://github.com/maxmind/libmaxminddb), then:
+
+```
+gem install hive_geoip2
+```
 
 ### Usage
 
