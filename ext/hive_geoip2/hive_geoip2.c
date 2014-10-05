@@ -5,9 +5,6 @@
 
 #include "maxminddb.h"
 
-#define WORDS_64 (64 / CHAR_BIT / SIZEOF_LONG)
-#define WORDS_128 (128/ CHAR_BIT / SIZEOF_LONG)
-
 VALUE rb_mHive;
 VALUE rb_cGeoIP2;
 
@@ -160,7 +157,21 @@ parse_data_list(MMDB_entry_data_list_s *data_list, VALUE *ret_obj) {
     
     case MMDB_DATA_TYPE_UINT64:
     {
-      *ret_obj = rb_big_unpack(&data_list->entry_data.uint64, WORDS_64);
+      const uint8_t *hex = "0123456789abcdef";
+      int i, idx = 0;
+      
+      size_t size = sizeof(uint64_t);
+      char buf[size * 2 + 1];
+      uint8_t *data = &data_list->entry_data.uint64;
+      
+      for (i = size - 1; i >= 0; i--) {
+        buf[idx++] = hex[data[i] >> 4];
+        buf[idx++] = hex[data[i] & 0x0f];
+      }
+      
+      buf[idx] = '\0';
+      
+      *ret_obj = rb_cstr2inum(buf, 16);
       
       data_list = data_list->next;
       
@@ -169,21 +180,30 @@ parse_data_list(MMDB_entry_data_list_s *data_list, VALUE *ret_obj) {
     
     case MMDB_DATA_TYPE_UINT128:
     {
+      const uint8_t *hex = "0123456789abcdef";
+      int i, idx = 0;
 #if MMDB_UINT128_IS_BYTE_ARRAY
-      char buf[16];
-      uint8_t i;
-      uint8_t idx = 15;
+      size_t size = 16;
+      char buf[size * 2 + 1];
       uint8_t *data = data_list->entry_data.uint128;
       
-      for (i = 0; i < 16; ++i) {
-        buf[i] = data[idx];
-        idx--;
+      for (i = 0; i < size; ++i) {
+        buf[idx++] = hex[data[i] >> 4];
+        buf[idx++] = hex[data[i] & 0x0f];
       }
-      
-      *ret_obj = rb_big_unpack(&buf, WORDS_128);
 #else
-      *ret_obj = rb_big_unpack(&data_list->entry_data.uint128, WORDS_128);
+      size_t size = sizeof(mmdb_uint128_t);
+      uint8_t buf[size * 2 + 1];
+      uint8_t *data = &data_list->entry_data.uint128;
+      
+      for (i = size - 1; i >= 0; i--) {
+        buf[idx++] = hex[data[i] >> 4];
+        buf[idx++] = hex[data[i] & 0x0f];
+      }
 #endif
+      buf[idx] = '\0';
+      
+      *ret_obj = rb_cstr2inum(buf, 16);
       
       data_list = data_list->next;
       
