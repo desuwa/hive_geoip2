@@ -162,9 +162,12 @@ parse_data_list(MMDB_entry_data_list_s *data_list, VALUE *ret_obj) {
       
       size_t size = sizeof(uint64_t);
       char buf[size * 2 + 1];
-      uint8_t *data = &data_list->entry_data.uint64;
-      
+      uint8_t *data = (uint8_t *)&data_list->entry_data.uint64;
+#ifdef WORDS_BIGENDIAN
+      for (i = 0; i < size; ++i) {
+#else
       for (i = size - 1; i >= 0; i--) {
+#endif
         buf[idx++] = hex[data[i] >> 4];
         buf[idx++] = hex[data[i] & 0x0f];
       }
@@ -194,9 +197,13 @@ parse_data_list(MMDB_entry_data_list_s *data_list, VALUE *ret_obj) {
 #else
       size_t size = sizeof(mmdb_uint128_t);
       uint8_t buf[size * 2 + 1];
-      uint8_t *data = &data_list->entry_data.uint128;
+      uint8_t *data = (uint8_t *)&data_list->entry_data.uint128;
       
+#ifdef WORDS_BIGENDIAN
+      for (i = 0; i < size; ++i) {
+#else
       for (i = size - 1; i >= 0; i--) {
+#endif
         buf[idx++] = hex[data[i] >> 4];
         buf[idx++] = hex[data[i] & 0x0f];
       }
