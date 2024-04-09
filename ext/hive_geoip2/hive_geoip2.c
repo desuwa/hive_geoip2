@@ -8,7 +8,7 @@
 VALUE rb_mHive;
 VALUE rb_cGeoIP2;
 
-static void guard_parse_data_list(VALUE arg);
+static VALUE guard_parse_data_list(VALUE arg);
 static MMDB_entry_data_list_s * parse_data_list(
   MMDB_entry_data_list_s *data_list, VALUE *ret_obj
 );
@@ -30,10 +30,12 @@ struct args_parse_data_list {
   VALUE *ret_obj;
 };
 
-static void guard_parse_data_list(VALUE arg) {
+static VALUE guard_parse_data_list(VALUE arg) {
   struct args_parse_data_list *args = (struct args_parse_data_list *)arg;
   
   parse_data_list(args->data_list, args->ret_obj);
+
+  return RUBY_Qnil;
 }
 
 static MMDB_entry_data_list_s *
