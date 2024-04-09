@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name = 'hive_geoip2'
-  s.version = '0.1.2'
+  s.version = '0.1.3'
   s.summary = 'libmaxminddb GeoIP2 Ruby bindings'
   s.author = 'Maxime Youdine'
   s.license = 'MIT'
