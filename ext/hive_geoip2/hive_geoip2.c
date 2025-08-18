@@ -19,6 +19,8 @@ static VALUE mmdb_lookup(MMDB_s *mmdb, char *ip_addr, bool cleanup);
 
 static VALUE rb_hive_geo_lookup(VALUE self, VALUE ip_arg);
 static VALUE rb_hive_geo_lookup2(VALUE self, VALUE ip_arg, VALUE db_arg);
+static VALUE rb_hive_geo_lookup_with_prefix_length(VALUE self, VALUE ip_arg);
+static VALUE rb_hive_geo_lookup_with_prefix_length2(VALUE self, VALUE ip_arg, VALUE db_arg);
 static VALUE rb_hive_geo_is_closed(VALUE self);
 static VALUE rb_hive_geo_close(VALUE self);
 static void rb_hive_geo_free(MMDB_s *mmdb);
@@ -320,11 +322,22 @@ static VALUE mmdb_lookup(MMDB_s *mmdb, char *ip_addr, bool cleanup) {
     if (exception) {
       rb_jump_tag(exception);
     }
-    
-    return ret_obj;
+
+    // Return [data, prefix_length] tuple
+    VALUE result_array = rb_ary_new2(2);
+    rb_ary_push(result_array, ret_obj);
+    rb_ary_push(result_array, INT2NUM(result.netmask));
+    return result_array;
   }
   else {
-    return Qnil;
+    if (cleanup) {
+      mmdb_close(mmdb);
+    }
+    // Return [nil, 0] for not found
+    VALUE result_array = rb_ary_new2(2);
+    rb_ary_push(result_array, Qnil);
+    rb_ary_push(result_array, INT2NUM(0));
+    return result_array;
   }
 }
 
@@ -340,8 +353,8 @@ static VALUE rb_hive_geo_lookup(VALUE self, VALUE ip_arg) {
   if (mmdb_is_closed(mmdb)) {
     rb_raise(rb_eIOError, "GeoIP2 - closed database");
   }
-  
-  return mmdb_lookup(mmdb, ip_addr, false);
+  VALUE result_tuple = mmdb_lookup(mmdb, ip_addr, false);
+  return rb_ary_entry(result_tuple, 0);  // Extract just the data part
 }
 
 static VALUE rb_hive_geo_lookup2(VALUE self, VALUE ip_arg, VALUE db_arg) {
@@ -354,8 +367,29 @@ static VALUE rb_hive_geo_lookup2(VALUE self, VALUE ip_arg, VALUE db_arg) {
   MMDB_s mmdb;
   
   mmdb_try_open(db_path, &mmdb);
-  
-  return mmdb_lookup(&mmdb, ip_addr, true);
+  VALUE result_tuple = mmdb_lookup(&mmdb, ip_addr, true);
+  return rb_ary_entry(result_tuple, 0);  // Extract just the data part
+}
+
+static VALUE rb_hive_geo_lookup_with_prefix_length(VALUE self, VALUE ip_arg) {
+  Check_Type(ip_arg, T_STRING);
+  char *ip_addr = StringValuePtr(ip_arg);
+  MMDB_s *mmdb;
+  Data_Get_Struct(self, MMDB_s, mmdb);
+  if (mmdb_is_closed(mmdb)) {
+    rb_raise(rb_eIOError, "GeoIP2 - closed database");
+  }
+  return mmdb_lookup(mmdb, ip_addr, false); // Return full tuple with prefix length
+}
+
+static VALUE rb_hive_geo_lookup_with_prefix_length2(VALUE self, VALUE ip_arg, VALUE db_arg) {
+  Check_Type(ip_arg, T_STRING);
+  Check_Type(db_arg, T_STRING);
+  char *ip_addr = StringValuePtr(ip_arg);
+  char *db_path = StringValuePtr(db_arg);
+  MMDB_s mmdb;
+  mmdb_try_open(db_path, &mmdb);
+  return mmdb_lookup(&mmdb, ip_addr, true);  // Return full tuple with prefix length
 }
 
 static VALUE rb_hive_geo_is_closed(VALUE self) {
@@ -413,9 +447,11 @@ void Init_hive_geoip2() {
   rb_define_alloc_func(rb_cGeoIP2, rb_hive_geo_alloc);
   
   rb_define_singleton_method(rb_cGeoIP2, "lookup", rb_hive_geo_lookup2, 2);
-  
+  rb_define_singleton_method(rb_cGeoIP2, "lookup_with_prefix_length", rb_hive_geo_lookup_with_prefix_length2, 2);
+
   rb_define_method(rb_cGeoIP2, "initialize", rb_hive_geo_init, 1);
   rb_define_method(rb_cGeoIP2, "close", rb_hive_geo_close, 0);
   rb_define_method(rb_cGeoIP2, "closed?", rb_hive_geo_is_closed, 0);
   rb_define_method(rb_cGeoIP2, "lookup", rb_hive_geo_lookup, 1);
+  rb_define_method(rb_cGeoIP2, "lookup_with_prefix_length", rb_hive_geo_lookup_with_prefix_length, 1);
 }
